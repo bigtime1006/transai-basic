@@ -1,0 +1,90 @@
+services:
+  db:
+    image: postgres:15
+    container_name: transai-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-transaidb}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: transai-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: transai-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-transaidb}
+      - REDIS_URL=redis://redis:6379/0
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - QWEN_PLUS_API_URL=${QWEN_PLUS_API_URL:-}
+      - QWEN_PLUS_MODEL=${QWEN_PLUS_MODEL:-}
+      - MAX_TEXT_TRANSLATION_BYTES=${MAX_TEXT_TRANSLATION_BYTES:-5000}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./downloads:/app/downloads
+      # 开发模式：启用代码热更新（将 backend 挂载到 /app）
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    container_name: transai-worker
+    command: celery -A app.worker.celery_app worker --loglevel=info
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-transaidb}
+      - REDIS_URL=redis://redis:6379/0
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - QWEN_PLUS_API_URL=${QWEN_PLUS_API_URL:-}
+      - QWEN_PLUS_MODEL=${QWEN_PLUS_MODEL:-}
+      - MAX_TEXT_TRANSLATION_BYTES=${MAX_TEXT_TRANSLATION_BYTES:-5000}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./downloads:/app/downloads
+      # 开发模式：启用代码热更新（将 backend 挂载到 /app）
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: transai-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      # 开发模式：启用代码热更新
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      # 开发模式：使用localhost（容器外访问）
+      - VITE_API_BASE_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,0 +1,24 @@
+{
+  "name": "transai-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "axios": "^1.4.0",
+    "element-plus": "^2.3.9",
+    "socket.io-client": "^4.7.2",
+    "vue": "^3.3.4",
+    "vue-i18n": "^12.0.0-alpha.3",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.2.3",
+    "vite": "^4.4.5"
+  }
+}

@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: transai-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-transaidb}
+      TZ: Asia/Shanghai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: transai-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: transai-backend
+    ports:
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-transaidb}
+      - REDIS_URL=redis://redis:6379/0
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      - DEEPSEEK_MAX_WORKERS=${DEEPSEEK_MAX_WORKERS:-10}
+      - DEEPSEEK_BATCH_SIZE=${DEEPSEEK_BATCH_SIZE:-20}
+      - DEEPSEEK_TIMEOUT=${DEEPSEEK_TIMEOUT:-60}
+      - DEEPSEEK_USE_JSON_FORMAT=${DEEPSEEK_USE_JSON_FORMAT:-true}
+      - DEEPSEEK_JSON_BATCH_SIZE=${DEEPSEEK_JSON_BATCH_SIZE:-50}
+      - KIMI_API_KEY=${KIMI_API_KEY}
+      - KIMI_API_URL=${KIMI_API_URL}
+      - KIMI_MAX_WORKERS=${KIMI_MAX_WORKERS:-5}
+      - KIMI_BATCH_SIZE=${KIMI_BATCH_SIZE:-30}
+      - KIMI_TIMEOUT=${KIMI_TIMEOUT:-60}
+      - YOUDAO_API_KEY=${YOUDAO_API_KEY}
+      - YOUDAO_API_URL=${YOUDAO_API_URL}
+      - YOUDAO_APP_ID=${YOUDAO_APP_ID}
+      - YOUDAO_APP_SECRET=${YOUDAO_APP_SECRET}
+      - YOUDAO_MAX_WORKERS=${YOUDAO_MAX_WORKERS:-3}
+      - YOUDAO_BATCH_SIZE=${YOUDAO_BATCH_SIZE:-10}
+      - YOUDAO_TIMEOUT=${YOUDAO_TIMEOUT:-60}
+      - MAX_TEXT_TRANSLATION_BYTES=${MAX_TEXT_TRANSLATION_BYTES:-5000}
+      - TZ=Asia/Shanghai
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - SECRET_KEY=${SECRET_KEY:-a_very_secret_key_for_transai}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./downloads:/app/downloads
+      - ./temp_responses:/app/temp_responses  # 新增：临时响应文件目录
+      # 开发模式：代码热更新挂载（注释掉则为生产模式）
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    container_name: transai-worker
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=4 --prefetch-multiplier=1 --queues=celery
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-transaidb}
+      - REDIS_URL=redis://redis:6379/0
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      - DEEPSEEK_MAX_WORKERS=${DEEPSEEK_MAX_WORKERS:-10}
+      - DEEPSEEK_BATCH_SIZE=${DEEPSEEK_BATCH_SIZE:-20}
+      - DEEPSEEK_TIMEOUT=${DEEPSEEK_TIMEOUT:-60}
+      - DEEPSEEK_USE_JSON_FORMAT=${DEEPSEEK_USE_JSON_FORMAT:-true}
+      - DEEPSEEK_JSON_BATCH_SIZE=${DEEPSEEK_JSON_BATCH_SIZE:-50}
+      - KIMI_API_KEY=${KIMI_API_KEY}
+      - KIMI_API_URL=${KIMI_API_URL}
+      - KIMI_MAX_WORKERS=${KIMI_MAX_WORKERS:-5}
+      - KIMI_BATCH_SIZE=${KIMI_BATCH_SIZE:-30}
+      - KIMI_TIMEOUT=${KIMI_TIMEOUT:-60}
+      - YOUDAO_API_KEY=${YOUDAO_API_KEY}
+      - YOUDAO_API_URL=${YOUDAO_API_URL}
+      - YOUDAO_APP_ID=${YOUDAO_APP_ID}
+      - YOUDAO_APP_SECRET=${YOUDAO_APP_SECRET}
+      - YOUDAO_MAX_WORKERS=${YOUDAO_MAX_WORKERS:-3}
+      - YOUDAO_BATCH_SIZE=${YOUDAO_BATCH_SIZE:-10}
+      - YOUDAO_TIMEOUT=${YOUDAO_TIMEOUT:-60}
+      - MAX_TEXT_TRANSLATION_BYTES=${MAX_TEXT_TRANSLATION_BYTES:-5000}
+      - TZ=Asia/Shanghai
+      - CELERY_WORKER_CONCURRENCY=4
+      - CELERY_TASK_ACKS_LATE=true
+      - CELERY_WORKER_PREFETCH_MULTIPLIER=1
+    volumes:
+      - ./uploads:/app/uploads
+      - ./downloads:/app/downloads
+      - ./temp_responses:/app/temp_responses  # 新增：临时响应文件目录
+      # 开发模式：代码热更新挂载（注释掉则为生产模式）
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  frontend:
+    build: ./frontend
+    container_name: transai-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      # 开发模式：代码热更新挂载（注释掉则为生产模式）
+      - ./frontend:/app
+    environment:
+      # 开发模式：使用localhost（容器外访问）
+      - VITE_API_BASE_URL=http://localhost:8000
+      # 生产模式：使用内部网络（取消注释）
+      # - VITE_API_BASE_URL=http://backend:8000
+    entrypoint: []
+    command: sh -c "cd /app && rm -rf node_modules && npm install && npx vite --host 0.0.0.0"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
