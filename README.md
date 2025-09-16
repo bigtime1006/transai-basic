@@ -16,7 +16,7 @@ An AI-powered translation tool for various document formats, including DOCX, PPT
 - **Frontend Console Cleanup**: Removed excessive debugging logs.
 
 - **Multi-Format Support**: DOCX, PPTX, XLSX, TXT, MD (PDF & OCR coming soon).
-- **Multi-Engine Support**: Qwen, DeepSeek, Tencent, Kimi, Youdao (extensible).
+- **Multi-Engine Support**: ChatGPT, GEMINI, Qwen, DeepSeek, Tencent, Kimi, Youdao (extensible).
 - **Intelligent Translation**: Supports batch JSON translation for improved efficiency.
 - **User Management**: User registration, login, and role-based access control (Admin/User).
 - **History Tracking**: Save, query, and delete translation history with user-based permissions. Supports per-user limits for text/document history and daily auto-cleanup of expired files/content.
