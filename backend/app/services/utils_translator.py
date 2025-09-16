@@ -11,6 +11,9 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 
+# 导入引擎配置管理器
+from .engine_config import EngineConfig
+
 # --- 配置日志 ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -118,24 +121,28 @@ class DeepSeekTranslator(TranslationEngine):
     """DeepSeek翻译引擎"""
     
     def __init__(self, **kwargs):
-        api_key = kwargs.get('api_key') or os.getenv("DEEPSEEK_API_KEY", "").strip()
-        api_url = kwargs.get('api_url') or os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
+        # 使用EngineConfig获取配置
+        cfg = EngineConfig.get_deepseek_config()
         
-        # 从环境变量或配置中获取批次大小设置
-        batch_size = kwargs.get('batch_size') or int(os.getenv("DEEPSEEK_BATCH_SIZE", "20"))
-        json_batch_size = kwargs.get('json_batch_size') or int(os.getenv("DEEPSEEK_JSON_BATCH_SIZE", "50"))
-        use_json_format = kwargs.get('use_json_format') or os.getenv("DEEPSEEK_USE_JSON_FORMAT", "true").lower() == "true"
+        api_key = kwargs.get('api_key') or cfg.get('api_key')
+        api_url = kwargs.get('api_url') or cfg.get('api_url')
         
         # 根据是否使用JSON格式选择批次大小
-        effective_batch_size = json_batch_size if use_json_format else batch_size
+        use_json_format = kwargs.get('use_json_format', cfg.get('use_json_format'))
+        if use_json_format:
+            batch_size = kwargs.get('json_batch_size', cfg.get('json_batch_size'))
+        else:
+            batch_size = kwargs.get('batch_size', cfg.get('batch_size'))
+
+        super().__init__(api_key, api_url, batch_size=batch_size, **kwargs)
         
-        super().__init__(api_key, api_url, batch_size=effective_batch_size, **kwargs)
-        
+        self.model = kwargs.get('model') or cfg.get('model')
+
         if not self.api_key:
             raise ValueError("DeepSeek API key is required")
         
-        logger.info(f"DeepSeekTranslator initialized - API URL: {self.api_url}, Batch Size: {self.batch_size}, JSON Format: {use_json_format}, JSON Batch Size: {json_batch_size}")
-    
+        logger.info(f"DeepSeekTranslator initialized - API URL: {self.api_url}, Model: {self.model}, Batch Size: {self.batch_size}")
+
     def build_payload(self, texts: List[str], src_lang: str, tgt_lang: str) -> Dict[str, Any]:
         """构造DeepSeek API请求负载"""
         lang_instruction = f"Translate the following texts from {src_lang} to {tgt_lang}."
@@ -152,7 +159,7 @@ class DeepSeekTranslator(TranslationEngine):
         user_content = f"Source language: {src_lang}\nTarget language: {tgt_lang}\nTexts to translate:\n{json.dumps(texts, ensure_ascii=False)}"
         
         return {
-            "model": "deepseek-chat",
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": user_content}
@@ -179,8 +186,8 @@ class DeepSeekTranslator(TranslationEngine):
                         logger.warning(f"Parsed JSON array count mismatch: expected {expected_count}, got {len(parsed)}")
                     else:
                         logger.info(f"Successfully parsed JSON array: {len(parsed)} items")
-                    return parsed if isinstance(parsed, list) else [str(parsed)]
-                # 1.2 是对象，常见为 {"translated_texts": [...]}
+                    return [str(p) for p in parsed]
+                # 1.2 是对象，常见为 {"translated_texts": [...]} 
                 if isinstance(parsed, dict):
                     for key in ("translated_texts", "translations", "data", "result"):
                         if key in parsed and isinstance(parsed[key], list):
@@ -191,37 +198,11 @@ class DeepSeekTranslator(TranslationEngine):
                                 logger.warning(f"Parsed JSON object key '{key}' count mismatch: expected {expected_count}, got {len(arr)}")
                             else:
                                 logger.info(f"Parsed JSON object key '{key}' as array: {len(arr)} items")
-                            return arr
-                    # 嵌套对象继续查找一次
-                    for v in parsed.values():
-                        if isinstance(v, dict):
-                            for key in ("translated_texts", "translations", "data"):
-                                if key in v and isinstance(v[key], list):
-                                    arr = v[key]
-                                    logger.info(f"Parsed nested JSON key '{key}' as array: {len(arr)} items")
-                                    if expected_count == 1 and len(arr) > 1:
-                                        return [" ".join(map(str, arr))]
-                                    return arr
+                            return [str(a) for a in arr]
             except json.JSONDecodeError:
                 pass
 
-            # 2) 提取对象中的 translated_texts 数组
-            obj_match = re.search(r'\{[\s\S]*?"translated_texts"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}', content, re.DOTALL)
-            if obj_match:
-                try:
-                    arr = json.loads(obj_match.group(1))
-                    if isinstance(arr, list):
-                        if expected_count == 1 and len(arr) > 1:
-                            return [" ".join(map(str, arr))]
-                        if len(arr) != expected_count:
-                            logger.warning(f"Extracted translated_texts count mismatch: expected {expected_count}, got {len(arr)}")
-                        else:
-                            logger.info(f"Extracted translated_texts array: {len(arr)} items")
-                        return arr
-                except json.JSONDecodeError:
-                    pass
-
-            # 3) 退回提取任意 JSON 数组
+            # 2) 退回提取任意 JSON 数组
             match = re.search(r'\s*(\[.*?\])\s*', content, re.DOTALL)
             if match:
                 try:
@@ -234,13 +215,12 @@ class DeepSeekTranslator(TranslationEngine):
                             logger.warning(f"Extracted JSON array count mismatch: expected {expected_count}, got {len(translations)}")
                         else:
                             logger.info(f"Successfully extracted {len(translations)} translations")
-                        return translations
+                        return [str(t) for t in translations]
                 except json.JSONDecodeError:
                     pass
             
             logger.warning(f"Failed to parse response properly, content: {content[:100]}...")
-            # 回落到原文，保证返回非空字符串
-            return [content] if expected_count == 1 else [content for _ in range(expected_count)]
+            return [content] if expected_count == 1 else [content] * expected_count
         except Exception as e:
             logger.error(f"Response parse error: {e}")
             return [""] * expected_count

@@ -1,54 +1,112 @@
-### Qwen Plus (qwen-plus)
+# 引擎配置说明
 
-- Type: Chat/QA style; used for translation via prompt engineering.
-- Model: `qwen-plus` (avoid `qwen-plus-latest` for stability).
-- Config keys (env/db): api_key, api_url, model, max_workers, batch_size, retry_max, sleep_between_requests, timeout.
-- Prompt control: supports `style_preset` and `style_instruction` for both text/document; `enable_thinking` allowed only on text.
-- Output: Enforced JSON array with same length as input; parser falls back to lines; empty results fallback to original.
-- Token usage: usage.total_tokens may be missing; aggregation planned.
+本文档说明了系统中支持的翻译引擎及其配置方式。
 
-# 多引擎与配置说明
+## 配置优先级
+
+所有引擎的配置都遵循统一的优先级顺序：
+
+1.  **数据库配置**：在“系统管理” -> “引擎设置”中为特定引擎保存的 JSON 配置。这是最高优先级，会覆盖下面的所有默认值。
+2.  **环境变量**：为容器或主机设置的环境变量。
+3.  **代码内置默认值**：代码中硬编码的备用 URL 或参数。
 
 ## 已集成引擎
-- DeepSeek：支持文本/JSON 双模式；JSON 可批量 + 结构化解析
-- Tencent：批量较大，时延稳定
-- Kimi：限流严格，含重试与退避
-- Youdao：字符/批次限制严格，语言对受限
-- Qwen3：兼容模式接入，逐条请求 + 退避；需针对 429 做节流
 
-## Qwen3 配置键（以“系统设置 - 引擎设置”为准）
-- api_key：`QWEN3_API_KEY` 或 `DASHSCOPE_API_KEY`
-- api_url：`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
-- model：`qwen-mt-turbo`（推荐）或 `qwen-mt-plus`
-- max_workers：并发线程（文档翻译对 qwen3 路径已逐条）
-- batch_size：批处理大小（对 qwen3 路径影响有限）
-- timeout：超时（秒）
-- retry_max：429/5xx 最大重试次数（建议 4~5）
-- sleep_between_requests：单条请求间的轻抖动（秒，建议 0.08~0.20）
+### 1. DeepSeek
 
-> 注意：脚本使用 OpenAI SDK 时 `base_url` 应为根地址：`https://dashscope.aliyuncs.com/compatible-mode/v1`
-> 系统后端使用的是完整 `api_url`（带 `/chat/completions`）。
+-   **引擎名称**: `deepseek`
+-   **特点**: 默认引擎，支持文本/JSON 双模式，JSON 模式下支持更大的批处理和结构化解析。
+-   **数据库/环境变量配置键**:
+    -   `api_key`: API 密钥 (必要)
+    -   `api_url`: API 地址 (默认为 `https://api.deepseek.com/v1/chat/completions`)
+    -   `model`: 模型名称 (默认为 `deepseek-chat`)
+    -   `max_workers`: 最大并发线程数
+    -   `batch_size`: 批处理大小
+    -   `timeout`: 请求超时 (秒)
+    -   `use_json_format`: 是否启用 JSON 模式 (布尔值, `true`/`false`)
+    -   `json_batch_size`: JSON 模式下的批处理大小
 
-## 初始化与默认
-- 启动自动插入缺失引擎配置，默认引擎优先 DeepSeek；否则选择第一个可用引擎
+### 2. Qwen Plus (qwen-plus)
 
-## 管理端操作
-- 列表/创建/更新/删除：`/api/admin/engines` 系列
-- 启停：`POST /api/admin/engines/{id}/toggle`
-- 聚合只读：`GET /api/admin/settings/engines`
+-   **引擎名称**: `qwen_plus` (或 `qwen-plus`)
+-   **特点**: 聊天式翻译引擎，通过提示工程实现翻译。
+-   **数据库/环境变量配置键**:
+    -   `api_key`: API 密钥 (必要, 可共用 `DASHSCOPE_API_KEY`)
+    -   `api_url`: API 地址 (默认为 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`)
+    -   `model`: 模型名称 (默认为 `qwen-plus`)
+    -   `max_workers`, `batch_size`, `timeout`
+    -   `retry_max`: 失败重试次数
+    -   `sleep_between_requests`: 请求间的节流等待时间 (秒)
 
-## Qwen3 并发与节流建议（当前验证结论）
-- 文档翻译：逐条请求 + 轻抖动（0.08~0.20s）来降低 429 触发概率
-- ≤60 条文本：`max_workers` 6–8；70–80 条：5；>80 条建议分批
-- `retry_max` 4–5，指数退避；必要时增大 `sleep_between_requests`
+### 3. Qwen3 (qwen3)
 
-## 运行期统计
-- 日志会输出 Qwen3 汇总：`total` / `success` / `429`
-- 文档历史明细会附带：`qwen3_total` / `qwen3_success` / `qwen3_429`（仅 qwen3）
+-   **引擎名称**: `qwen3` (或 `qwen`, `qwen-mt`)
+-   **特点**: 阿里通义翻译模型，兼容 OpenAI 模式接入。
+-   **数据库/环境变量配置键**:
+    -   `api_key`: API 密钥 (必要, 可共用 `DASHSCOPE_API_KEY`)
+    -   `api_url`: API 地址
+    -   `model`: 模型名称 (推荐 `qwen-mt-turbo`)
+    -   `max_workers`, `batch_size`, `timeout`, `retry_max`, `sleep_between_requests`
 
-## 环境变量（节选）
-- Qwen3：`QWEN3_API_KEY` 或 `DASHSCOPE_API_KEY`、`QWEN3_API_URL`、`QWEN3_MODEL`
-- DeepSeek：`DEEPSEEK_API_KEY`、`DEEPSEEK_USE_JSON_FORMAT`、`DEEPSEEK_JSON_BATCH_SIZE`
-- Tencent：`TENCENT_SECRET_ID`、`TENCENT_SECRET_KEY`、`TENCENT_REGION`
-- Kimi：`KIMI_API_KEY`
-- Youdao：`YOUDAO_APP_ID`、`YOUDAO_APP_SECRET`
+### 4. Kimi
+
+-   **引擎名称**: `kimi`
+-   **特点**: 月之暗面公司的大模型，限流较严格，内置了重试与退避机制。
+-   **数据库/环境变量配置键**:
+    -   `api_key`: API 密钥 (必要)
+    -   `api_url`: API 地址 (默认为 `https://api.moonshot.cn/v1/chat/completions`)
+    -   `model`: 模型名称 (默认为 `moonshot-v1-8k`)
+    -   `max_workers`, `batch_size`, `timeout`
+
+### 5. Tencent Translator
+
+-   **引擎名称**: `tencent`
+-   **特点**: 腾讯翻译服务，批处理量大，延迟稳定。
+-   **环境变量配置键** (暂不支持数据库配置):
+    -   `TENCENT_SECRET_ID`: Secret ID (必要)
+    -   `TENCENT_SECRET_KEY`: Secret Key (必要)
+    -   `TENCENT_REGION`: 区域 (默认为 `ap-beijing`)
+
+### 6. Youdao
+
+-   **引擎名称**: `youdao`
+-   **特点**: 有道智云翻译，对字符数和批次大小限制严格。
+-   **环境变量配置键** (暂不支持数据库配置):
+    -   `YOUDAO_APP_ID`: 应用 ID (必要)
+    -   `YOUDAO_APP_SECRET`: 应用密钥 (必要)
+
+---
+
+## 如何添加新引擎 (样例)
+
+系统已内置了添加新引擎的逻辑框架。以下是如何配置 ChatGPT 和 Gemini 的示例。
+
+### ChatGPT (openai)
+
+1.  **引擎名称**: `chatgpt` (或 `openai`)
+2.  **添加配置**:
+    -   **方式一 (推荐)**: 在“引擎设置”中，创建一个新引擎，引擎名称填 `chatgpt`。在 API 配置的 JSON 中输入以下内容：
+        ```json
+        {
+          "api_key": "sk-...",
+          "api_url": "https://api.openai.com/v1/chat/completions",
+          "model": "gpt-4o"
+        }
+        ```
+    -   **方式二 (环境变量)**: 设置 `CHATGPT_API_KEY`, `CHATGPT_API_URL`, `CHATGPT_MODEL` 等环境变量。
+3.  **实现代码**: 需要在 `backend/app/services/utils_translator.py` 中仿照 `DeepSeekTranslator` 创建一个 `ChatGPTTranslator` 类并注册到工厂中。
+
+### Gemini (google)
+
+1.  **引擎名称**: `gemini` (或 `google`)
+2.  **添加配置**:
+    -   **方式一 (推荐)**: 在“引擎设置”中创建新引擎 `gemini`，并配置 JSON：
+        ```json
+        {
+          "api_key": "...",
+          "api_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+          "model": "gemini-pro"
+        }
+        ```
+    -   **方式二 (环境变量)**: 设置 `GEMINI_API_KEY`, `GEMINI_API_URL`, `GEMINI_MODEL` 等环境变量。
+3.  **实现代码**: 与 ChatGPT 类似，需要创建 `GeminiTranslator` 类并注册。
